@@ -187,6 +187,9 @@ jobs:
     name: Publish
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       TARGET: x86_64-unknown-linux-gnu
     steps:
@@ -204,9 +207,12 @@ jobs:
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
+          # The token must outlive the image build, as buildx only pushes at the end
+          DOCKERHUB_OIDC_EXPIREIN: 3600
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+          username: ${{ vars.DOCKERHUB_ORGANIZATION }}
 
       - name: Publish to Docker Hub
         run: |

@@ -22,6 +22,9 @@ on:
 jobs:
   publish:
     uses: ./.github/workflows/publish-docker.yml
+    permissions:
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       zisk_ref: ${{ inputs.zisk_ref }}
