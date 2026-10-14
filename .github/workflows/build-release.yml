@@ -122,7 +122,8 @@ jobs:
         working-directory: src/runtime
         run: |
           dotnet nuget push ./artifacts/package/release/*.nupkg \
-            -k "${{ steps.login.outputs.NUGET_API_KEY }}" -s ${{ env.NUGET_SOURCE }}
+            -k "${{ steps.login.outputs.NUGET_API_KEY }}" -s ${{ env.NUGET_SOURCE }} \
+            --skip-duplicate
 
       - name: Upload nupkg artifact
         uses: actions/upload-artifact@v7
