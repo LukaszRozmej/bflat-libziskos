@@ -187,8 +187,6 @@ jobs:
     name: Publish
     needs: build
     runs-on: ubuntu-latest
-    # Docker Hub OIDC trusts only this environment
-    environment: docker-hub
     permissions:
       contents: read
       id-token: write
