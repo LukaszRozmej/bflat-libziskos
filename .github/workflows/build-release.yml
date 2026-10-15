@@ -14,7 +14,7 @@ on:
       zisk_ref:
         description: Zisk ref
         type: string
-        default: v1.3.0-alpha
+        default: v1.3.2-alpha
       build_docker:
         description: Build ZisK Docker image
         type: boolean
