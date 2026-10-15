@@ -37,6 +37,9 @@ jobs:
       - name: Check secp256k1 tables
         run: python3 build/secp256k1/gen_tables.py --check
 
+      - name: Test secp256k1 recovery
+        run: tests/secp256k1/run.sh
+
       - name: Build static library
         run: ./build/build.sh
 
