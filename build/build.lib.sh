@@ -27,6 +27,12 @@ function prepare_repo() {
     echo "Copying entrypoint patch..."
     cp "${SCRIPT_DIR}/entrypoint.patch" . || fail "Failed to copy patch file"
 
+    # Copy the windowed secp256k1 double-scalar multiplication
+    echo "Copying secp256k1 sources and patch..."
+    SECP_DIR="ziskos/entrypoint/src/zisklib/lib/secp256k1"
+    cp "${SCRIPT_DIR}/secp256k1/straus.rs" "${SCRIPT_DIR}/secp256k1/g_tables.rs" "${SECP_DIR}/" || fail "Failed to copy secp256k1 sources"
+    cp "${SCRIPT_DIR}/secp256k1/secp256k1.patch" . || fail "Failed to copy secp256k1 patch"
+
     popd > /dev/null
 }
 
@@ -61,6 +67,7 @@ function build_in_docker() {
             echo 'Applying patches for no_entrypoint feature...'
             # Apply patch to wrap _start, _zisk_main, memcpy, memmove and replace sys_alloc_aligned
             patch -p1 -l < /workspace/entrypoint.patch || exit 1
+            patch -p1 < /workspace/secp256k1.patch || exit 1
 
             # Rename DMA mem* symbols to __wrap_* (done with sed rather than the
             # patch so upstream changes to the instruction bodies do not break it)
