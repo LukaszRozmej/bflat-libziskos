@@ -7,6 +7,8 @@ BUILD="$(cd "${HERE}/../../build" && pwd)"
 ZISK_DIR="${HERE}/target/zisk"
 SECP="ziskos/entrypoint/src/zisklib/lib/secp256k1"
 
+python3 -B -m unittest discover -s "${HERE}" -p test_ecrecover.py
+
 rm -rf "${ZISK_DIR}"
 git init -q "${ZISK_DIR}"
 git -C "${ZISK_DIR}" fetch -q --depth=1 https://github.com/0xPolygonHermez/zisk.git "${ZISK_REF:?ZISK_REF is not set}"
