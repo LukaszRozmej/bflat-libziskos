@@ -23,7 +23,9 @@ import os
 import random
 import subprocess
 import sys
+import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 P = 2**256 - 2**32 - 977
 N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -230,7 +232,10 @@ def run(exe, commands):
     result = subprocess.run([str(exe)], input="".join(commands), capture_output=True, text=True)
     if result.returncode != 0:
         sys.exit(f"harness failed ({result.returncode}): {result.stderr.strip()}")
-    return result.stdout.splitlines()
+    lines = result.stdout.splitlines()
+    if len(lines) != len(commands):
+        sys.exit(f"harness returned {len(lines)} results for {len(commands)} commands")
+    return lines
 
 
 def all_vectors(rng, count):
@@ -314,9 +319,9 @@ def keccak256(data):
     """Keccak-256 (the pre-NIST padding Ethereum uses), for the known-vector addresses."""
     rate = 136
     state = [0] * 25
-    data = bytearray(data) + b"\x01" + b"\x00" * ((-len(data) - 2) % rate) + b"\x80"
-    if len(data) % rate:
-        raise AssertionError
+    data = bytearray(data) + b"\x01"
+    data += b"\x00" * (-len(data) % rate)
+    data[-1] |= 0x80
     rotations = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]
     constants = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000, 0x000000000000808B,
                  0x0000000080000001, 0x8000000080008081, 0x8000000000008009, 0x000000000000008A, 0x0000000000000088,
@@ -342,6 +347,33 @@ def keccak256(data):
             state = [b[i] ^ (~b[(i % 5 + 1) % 5 + 5 * (i // 5)] & b[(i % 5 + 2) % 5 + 5 * (i // 5)]) for i in range(25)]
             state[0] ^= rc
     return b"".join(state[i].to_bytes(8, "little") for i in range(4))
+
+
+class DriverTests(unittest.TestCase):
+    def test_harness_result_count(self):
+        commands = ["recover first\n", "recover second\n"]
+        for count in (0, 1, 2, 3):
+            with self.subTest(count=count):
+                result = subprocess.CompletedProcess([], 0, stdout="fail 1 0 0 0\n" * count)
+                with patch.object(subprocess, "run", return_value=result):
+                    if count == len(commands):
+                        self.assertEqual(run(Path("harness"), commands), ["fail 1 0 0 0"] * count)
+                    else:
+                        with self.assertRaises(SystemExit):
+                            run(Path("harness"), commands)
+
+    def test_keccak_padding_boundaries(self):
+        # Keccak-256 of zero bytes, cross-checked with PyCryptodome.
+        vectors = [
+            (0, "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+            (134, "20926439d7d1663c4d224931643bb513f3ebf181ab353278b24399f518dc5f97"),
+            (135, "29e3704feeca7fb9ba229f0fa04d9b36449cf3ad6e1d85d9cfff3a10df9abc3e"),
+            (136, "3a5912a7c5faa06ee4fe906253e339467a9ce87d533c65be3c15cb231cdb25f9"),
+            (271, "3bb611e98ca876adc01436a582979ecfd012389033aca7dbf76dcb424fe02a0c"),
+        ]
+        for length, expected in vectors:
+            with self.subTest(length=length):
+                self.assertEqual(keccak256(bytes(length)).hex(), expected)
 
 
 if __name__ == "__main__":
