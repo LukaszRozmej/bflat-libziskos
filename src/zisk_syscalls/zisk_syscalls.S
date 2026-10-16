@@ -36,6 +36,23 @@
     .size \name, .-\name
 .endm
 
+/* Precompiles taking (destination a0, source a1, length a2): the transpiler fuses
+ * the csrs with the add after it into one operation only while they are adjacent. */
+.macro ZKVM_CSR_PAIR name, csr
+    .section .text, "ax", @progbits
+    .balign 4
+    .global \name
+    .type \name, @function
+\name:
+    .cfi_startproc
+    /* leaf: no stack frame */
+    csrs    \csr, a1
+    add     x0, a0, a2
+    ret
+    .cfi_endproc
+    .size \name, .-\name
+.endm
+
 /* Exported symbols (one per precompile). */
 ZKVM_CSR_VOID     zkvm_keccakf,               0x800
 ZKVM_CSR_VOID     zkvm_arith256,              0x801
@@ -62,3 +79,5 @@ ZKVM_CSR_VOID     zkvm_dma_memcmp,            0x814
  * (definitions/src/syscall.rs); secp256r1 moved up to 0x817/0x818. */
 ZKVM_CSR_VOID     zkvm_secp256r1_add,         0x817
 ZKVM_CSR_VOID     zkvm_secp256r1_dbl,         0x818
+/* EVM JUMPDEST bitmap of a code (bitmap, code, size in bytes). */
+ZKVM_CSR_PAIR     zkvm_jump_dest_bitmap,      0x81C
