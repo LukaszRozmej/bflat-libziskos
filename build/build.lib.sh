@@ -33,6 +33,10 @@ function prepare_repo() {
     cp "${SCRIPT_DIR}/secp256k1/straus.rs" "${SCRIPT_DIR}/secp256k1/g_tables.rs" "${SECP_DIR}/" || fail "Failed to copy secp256k1 sources"
     cp "${SCRIPT_DIR}/secp256k1/secp256k1.patch" . || fail "Failed to copy secp256k1 patch"
 
+    # Pass Fp2 operands to the complex-field syscalls in place
+    echo "Copying Fp2 patch..."
+    cp "${SCRIPT_DIR}/fp2/fp2.patch" . || fail "Failed to copy Fp2 patch"
+
     popd > /dev/null
 }
 
@@ -68,6 +72,7 @@ function build_in_docker() {
             # Apply patch to wrap _start, _zisk_main, memcpy, memmove and replace sys_alloc_aligned
             patch -p1 -l < /workspace/entrypoint.patch || exit 1
             patch -p1 < /workspace/secp256k1.patch || exit 1
+            patch -p1 < /workspace/fp2.patch || exit 1
 
             # Rename DMA mem* symbols to __wrap_* (done with sed rather than the
             # patch so upstream changes to the instruction bodies do not break it)
