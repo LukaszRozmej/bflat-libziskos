@@ -1,8 +1,21 @@
 diff --git a/ziskos/entrypoint/src/zisklib/lib/bls12_381/fp2.rs b/ziskos/entrypoint/src/zisklib/lib/bls12_381/fp2.rs
-index 39725ff..f456a9a 100644
+index 39725ff..7124f43 100644
 --- a/ziskos/entrypoint/src/zisklib/lib/bls12_381/fp2.rs
 +++ b/ziskos/entrypoint/src/zisklib/lib/bls12_381/fp2.rs
-@@ -36,6 +36,20 @@ fn from_syscall_complex(complex: &SyscallComplex384) -> [u64; 12] {
+@@ -11,12 +11,6 @@ use crate::{
+ 
+ use super::constants::{NQR_FP2, P, P_MINUS_ONE};
+ 
+-/// Helper to convert from array representation to syscall representation
+-#[inline]
+-fn to_syscall_complex(limbs: &[u64; 12]) -> SyscallComplex384 {
+-    SyscallComplex384 { x: limbs[0..6].try_into().unwrap(), y: limbs[6..12].try_into().unwrap() }
+-}
+-
+ #[inline]
+ fn to_syscall_complex_x(limbs: &[u64; 6]) -> SyscallComplex384 {
+     SyscallComplex384 { x: *limbs, y: [0u64; 6] }
+@@ -36,6 +30,20 @@ fn from_syscall_complex(complex: &SyscallComplex384) -> [u64; 12] {
      result
  }
  
@@ -23,7 +36,7 @@ index 39725ff..f456a9a 100644
  /// Sign function in the degree 2 extension of the BLS12-381 curve
  pub fn sgn0_fp2_bls12_381(x: &[u64; 12]) -> u64 {
      let sign_0 = x[0] & 1;
-@@ -51,15 +65,14 @@ pub fn add_fp2_bls12_381(
+@@ -51,15 +59,14 @@ pub fn add_fp2_bls12_381(
      b: &[u64; 12],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -42,7 +55,7 @@ index 39725ff..f456a9a 100644
  }
  
  /// Doubling in the degree 2 extension of the BLS12-381 curve
-@@ -68,15 +81,14 @@ pub fn dbl_fp2_bls12_381(
+@@ -68,15 +75,14 @@ pub fn dbl_fp2_bls12_381(
      a: &[u64; 12],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -61,7 +74,7 @@ index 39725ff..f456a9a 100644
  }
  
  /// Negation in the degree 2 extension of the BLS12-381 curve
-@@ -85,15 +97,15 @@ pub fn neg_fp2_bls12_381(
+@@ -85,15 +91,15 @@ pub fn neg_fp2_bls12_381(
      a: &[u64; 12],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -80,7 +93,7 @@ index 39725ff..f456a9a 100644
  }
  
  /// Subtraction in the degree 2 extension of the BLS12-381 curve
-@@ -103,15 +115,14 @@ pub fn sub_fp2_bls12_381(
+@@ -103,15 +109,14 @@ pub fn sub_fp2_bls12_381(
      b: &[u64; 12],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -99,7 +112,7 @@ index 39725ff..f456a9a 100644
  }
  
  /// Multiplication in the degree 2 extension of the BLS12-381 curve
-@@ -121,15 +132,14 @@ pub fn mul_fp2_bls12_381(
+@@ -121,15 +126,14 @@ pub fn mul_fp2_bls12_381(
      b: &[u64; 12],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -118,7 +131,7 @@ index 39725ff..f456a9a 100644
  }
  
  /// Scalar multiplication in the degree 2 extension of the BLS12-381 curve
-@@ -139,16 +149,16 @@ pub fn scalar_mul_fp2_bls12_381(
+@@ -139,16 +143,16 @@ pub fn scalar_mul_fp2_bls12_381(
      b: &[u64; 6],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -138,7 +151,7 @@ index 39725ff..f456a9a 100644
  }
  
  /// Squaring in the degree 2 extension of the BLS12-381 curve
-@@ -157,15 +167,14 @@ pub fn square_fp2_bls12_381(
+@@ -157,15 +161,14 @@ pub fn square_fp2_bls12_381(
      a: &[u64; 12],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 12] {
@@ -158,10 +171,23 @@ index 39725ff..f456a9a 100644
  
  /// Square root in the degree 2 extension of the BLS12-381 curve
 diff --git a/ziskos/entrypoint/src/zisklib/lib/bn254/fp2.rs b/ziskos/entrypoint/src/zisklib/lib/bn254/fp2.rs
-index 22cc43b..f2de12e 100644
+index 22cc43b..b7dc11a 100644
 --- a/ziskos/entrypoint/src/zisklib/lib/bn254/fp2.rs
 +++ b/ziskos/entrypoint/src/zisklib/lib/bn254/fp2.rs
-@@ -36,6 +36,20 @@ fn from_syscall_complex(complex: &SyscallComplex256) -> [u64; 8] {
+@@ -11,12 +11,6 @@ use crate::{
+ 
+ use super::constants::{P, P_MINUS_ONE};
+ 
+-/// Helper to convert from array representation to syscall representation
+-#[inline]
+-fn to_syscall_complex(limbs: &[u64; 8]) -> SyscallComplex256 {
+-    SyscallComplex256 { x: limbs[0..4].try_into().unwrap(), y: limbs[4..8].try_into().unwrap() }
+-}
+-
+ #[inline]
+ fn to_syscall_complex_x(limbs: &[u64; 4]) -> SyscallComplex256 {
+     SyscallComplex256 { x: *limbs, y: [0u64; 4] }
+@@ -36,6 +30,20 @@ fn from_syscall_complex(complex: &SyscallComplex256) -> [u64; 8] {
      result
  }
  
@@ -182,7 +208,7 @@ index 22cc43b..f2de12e 100644
  /// Addition in the degree 2 extension of the BN254 curve
  #[inline]
  pub fn add_fp2_bn254(
-@@ -43,46 +57,44 @@ pub fn add_fp2_bn254(
+@@ -43,46 +51,44 @@ pub fn add_fp2_bn254(
      b: &[u64; 8],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 8] {
@@ -238,7 +264,7 @@ index 22cc43b..f2de12e 100644
  }
  
  /// Subtraction in the degree 2 extension of the BN254 curve
-@@ -92,16 +104,15 @@ pub fn sub_fp2_bn254(
+@@ -92,16 +98,15 @@ pub fn sub_fp2_bn254(
      b: &[u64; 8],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 8] {
@@ -258,7 +284,7 @@ index 22cc43b..f2de12e 100644
  }
  
  /// Multiplication in the degree 2 extension of the BN254 curve
-@@ -111,16 +122,15 @@ pub fn mul_fp2_bn254(
+@@ -111,16 +116,15 @@ pub fn mul_fp2_bn254(
      b: &[u64; 8],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 8] {
@@ -278,7 +304,7 @@ index 22cc43b..f2de12e 100644
  }
  
  /// Scalar multiplication in the degree 2 extension of the BN254 curve
-@@ -130,31 +140,30 @@ pub fn scalar_mul_fp2_bn254(
+@@ -130,31 +134,30 @@ pub fn scalar_mul_fp2_bn254(
      b: &[u64; 4],
      #[cfg(feature = "hints")] hints: &mut Vec<u64>,
  ) -> [u64; 8] {
