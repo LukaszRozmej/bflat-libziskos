@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 
 use crate::syscalls::{
     syscall_arith256_mod, syscall_secp256k1_add, syscall_secp256k1_dbl, SyscallArith256ModParams,
-    SyscallPoint256, SyscallSecp256k1AddParams,
+    SyscallPoint256,
 };
 
 use super::{
@@ -71,9 +71,9 @@ impl Accumulator {
             }
             return;
         }
-        let mut params = SyscallSecp256k1AddParams { p1: &mut self.point, p2: q };
         syscall_secp256k1_add(
-            &mut params,
+            &mut self.point,
+            q,
             #[cfg(feature = "hints")]
             hints,
         );
@@ -163,9 +163,9 @@ pub(crate) fn straus_double_scalar_mul_with_g_secp256k1(
             *entry = lower[P_TABLE_MID + d - 1];
             let base = &lower[P_TABLE_MID + 1];
             assert!(!same_x(entry, base), "table points must have distinct x");
-            let mut params = SyscallSecp256k1AddParams { p1: entry, p2: base };
             syscall_secp256k1_add(
-                &mut params,
+                entry,
+                base,
                 #[cfg(feature = "hints")]
                 hints,
             );
