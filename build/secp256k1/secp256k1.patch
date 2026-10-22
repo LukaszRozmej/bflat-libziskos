@@ -1,3 +1,109 @@
+diff --git a/ziskos/entrypoint/src/zisklib/lib/secp256k1/ecdsa.rs b/ziskos/entrypoint/src/zisklib/lib/secp256k1/ecdsa.rs
+index ad4113e..54c8c61 100644
+--- a/ziskos/entrypoint/src/zisklib/lib/secp256k1/ecdsa.rs
++++ b/ziskos/entrypoint/src/zisklib/lib/secp256k1/ecdsa.rs
+@@ -1,6 +1,5 @@
+ use crate::zisklib::{
+-    be_bytes_to_u64_4, eq, glv_double_scalar_mul_with_g_secp256k1, gt, is_zero, u64_4_to_be_bytes,
+-    ZERO_256,
++    be_bytes_to_u64_4, eq, glv_double_scalar_mul_with_g_secp256k1, gt, is_zero, ZERO_256,
+ };
+ 
+ use super::{
+@@ -219,6 +218,59 @@ pub(crate) unsafe fn secp256k1_ecdsa_verify_c(
+     )
+ }
+ 
++/// Reads the big-endian 256-bit value at `bytes`, which need not be aligned, as little-endian limbs.
++#[inline(always)]
++unsafe fn read_be_u256(bytes: *const u8) -> [u64; 4] {
++    [load_be_u64(bytes.add(24)), load_be_u64(bytes.add(16)), load_be_u64(bytes.add(8)), load_be_u64(bytes)]
++}
++
++/// Writes little-endian limbs as a big-endian 256-bit value at `bytes`, which need not be aligned.
++#[inline(always)]
++unsafe fn write_be_u256(bytes: *mut u8, limbs: &[u64; 4]) {
++    store_be_u64(bytes, limbs[3]);
++    store_be_u64(bytes.add(8), limbs[2]);
++    store_be_u64(bytes.add(16), limbs[1]);
++    store_be_u64(bytes.add(24), limbs[0]);
++}
++
++/// One `ld` and one `rev8`: ZisK executes both, while the rv64ima target would read byte by byte.
++#[inline(always)]
++unsafe fn load_be_u64(bytes: *const u8) -> u64 {
++    #[cfg(zisk_guest)]
++    {
++        let value: u64;
++        core::arch::asm!(
++            "ld {v}, 0({p})",
++            // rev8 {v}, {v}
++            ".insn i 0x13, 5, {v}, {v}, 0x6b8",
++            p = in(reg) bytes,
++            v = out(reg) value,
++            options(pure, readonly, nostack, preserves_flags),
++        );
++        value
++    }
++    #[cfg(not(zisk_guest))]
++    {
++        u64::from_be_bytes(core::ptr::read_unaligned(bytes as *const [u8; 8]))
++    }
++}
++
++#[inline(always)]
++unsafe fn store_be_u64(bytes: *mut u8, value: u64) {
++    #[cfg(zisk_guest)]
++    core::arch::asm!(
++        // rev8 {t}, {v}
++        ".insn i 0x13, 5, {t}, {v}, 0x6b8",
++        "sd {t}, 0({p})",
++        p = in(reg) bytes,
++        v = in(reg) value,
++        t = out(reg) _,
++        options(nostack, preserves_flags),
++    );
++    #[cfg(not(zisk_guest))]
++    core::ptr::write_unaligned(bytes as *mut [u8; 8], value.to_be_bytes());
++}
++
+ /// C-compatible wrapper for ecdsa_recover_secp256k1
+ ///
+ /// # Safety
+@@ -244,17 +296,9 @@ pub(crate) unsafe fn secp256k1_ecdsa_recover_c(
+     output: *mut u8,
+     #[cfg(feature = "hints")] hints: &mut Vec<u64>,
+ ) -> u8 {
+-    let sig_bytes: &[u8; 64] = &*(sig as *const [u8; 64]);
+-    let msg_bytes: &[u8; 32] = &*(msg as *const [u8; 32]);
+-    let output_bytes: &mut [u8; 64] = &mut *(output as *mut [u8; 64]);
+-
+-    // Parse r, s, z from big-endian bytes
+-    let r_bytes: [u8; 32] = sig_bytes[0..32].try_into().unwrap();
+-    let s_bytes: [u8; 32] = sig_bytes[32..64].try_into().unwrap();
+-
+-    let r = be_bytes_to_u64_4(&r_bytes);
+-    let s = be_bytes_to_u64_4(&s_bytes);
+-    let z = be_bytes_to_u64_4(msg_bytes);
++    let r = read_be_u256(sig);
++    let s = read_be_u256(sig.add(32));
++    let z = read_be_u256(msg);
+ 
+     // Perform ecrecover
+     match ecdsa_recover_secp256k1(
+@@ -267,10 +311,8 @@ pub(crate) unsafe fn secp256k1_ecdsa_recover_c(
+     ) {
+         Ok(pk) => {
+             // pk is [u64; 8]: x in limbs [0..4] and y in limbs [4..8], little-endian
+-            let x = [pk[0], pk[1], pk[2], pk[3]];
+-            let y = [pk[4], pk[5], pk[6], pk[7]];
+-            output_bytes[..32].copy_from_slice(&u64_4_to_be_bytes(&x));
+-            output_bytes[32..].copy_from_slice(&u64_4_to_be_bytes(&y));
++            write_be_u256(output, &[pk[0], pk[1], pk[2], pk[3]]);
++            write_be_u256(output.add(32), &[pk[4], pk[5], pk[6], pk[7]]);
+             ECDSA_RECOVER_SUCCESS
+         }
+         Err(code) => code,
 diff --git a/ziskos/entrypoint/src/zisklib/lib/secp256k1/glv.rs b/ziskos/entrypoint/src/zisklib/lib/secp256k1/glv.rs
 index bbd8af4..f7db2fa 100644
 --- a/ziskos/entrypoint/src/zisklib/lib/secp256k1/glv.rs
