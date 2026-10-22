@@ -122,3 +122,8 @@ ZKVM_LIBCALL      zkvm_u256_le_sdiv,          0x883
 ZKVM_LIBCALL      zkvm_u256_le_smod,          0x884
 ZKVM_LIBCALL      zkvm_u256_le_sdivmod,       0x885
 ZKVM_LIBCALL      zkvm_u256_le_exp,           0x88B
+
+/* keccak256 of a byte string (data a0, length a1, 32-byte digest a2), ZisK's own sponge
+ * (ziskasm/zisklib/zkvm/keccak.zisk). Named apart from ziskos' zkvm_keccak256, which
+ * the Rust crate still exports. */
+ZKVM_LIBCALL      zisklib_keccak256,          0x850
