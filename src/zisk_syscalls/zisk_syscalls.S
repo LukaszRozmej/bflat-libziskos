@@ -127,3 +127,7 @@ ZKVM_LIBCALL      zkvm_u256_le_exp,           0x88B
  * (ziskasm/zisklib/zkvm/keccak.zisk). Named apart from ziskos' zkvm_keccak256, which
  * the Rust crate still exports. */
 ZKVM_LIBCALL      zisklib_keccak256,          0x850
+
+/* secp256k1 public-key recovery (hash a0, r || s a1, recovery id a2, 64-byte key a3),
+ * ZisK's own routine; returns 0 on success. */
+ZKVM_LIBCALL      zisklib_secp256k1_ecrecover, 0x854
