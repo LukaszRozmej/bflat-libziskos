@@ -98,3 +98,27 @@ ZKVM_CSR_TWO      zkvm_secp256r1_add,         0x817
 ZKVM_CSR_VOID     zkvm_secp256r1_dbl,         0x818
 /* EVM JUMPDEST bitmap of a code (bitmap, code, size in bytes). */
 ZKVM_CSR_PAIR     zkvm_jump_dest_bitmap,      0x81C
+
+/* ZisK library calls (zisk v1.4.0, definitions/src/zkvmcall.rs): the transpiler turns
+ * `csrs <id>, x0` into a jump to a hand-written routine that takes the arguments in
+ * a0..a7 and returns to ra, so the `ret` here is never reached. */
+.macro ZKVM_LIBCALL name, id
+    .section .text.\name, "ax", @progbits
+    .balign 4
+    .global \name
+    .type \name, @function
+\name:
+    csrs    \id, x0
+    ret
+    .size \name, .-\name
+.endm
+
+/* Little-endian U256 (ziskasm/lang/c/include/zkvm_u256_le.h): four 64-bit limbs,
+ * least significant first; a zero divisor gives zero. */
+ZKVM_LIBCALL      zkvm_u256_le_div,           0x880
+ZKVM_LIBCALL      zkvm_u256_le_mod,           0x881
+ZKVM_LIBCALL      zkvm_u256_le_divmod,        0x882
+ZKVM_LIBCALL      zkvm_u256_le_sdiv,          0x883
+ZKVM_LIBCALL      zkvm_u256_le_smod,          0x884
+ZKVM_LIBCALL      zkvm_u256_le_sdivmod,       0x885
+ZKVM_LIBCALL      zkvm_u256_le_exp,           0x88B
