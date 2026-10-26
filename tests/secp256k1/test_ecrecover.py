@@ -225,6 +225,20 @@ def random_garbage(rng, count):
         yield b32(rng.randrange(2**256)), b32(rng.randrange(1, N)) + b32(rng.randrange(1, N)), rng.randrange(4)
 
 
+def replay_regressions():
+    # These inputs force equal coordinates at offset removal and at the last phi(R) addition,
+    # respectively. Both recover non-infinity keys, but an offset/replay walk doubles its work.
+    vectors = [
+        ("3f3f0c5de03c2b42f763614056d5a22211e74851da205e2ce72f2095c6bd9417",
+         "49e5474bedb5c8daf98555048d06c774b3cb3a37ec558d88c2dff40f4d12ab016"
+         "6c8f78e75526783d17996ce78241f8a031a3b76c36040980e5814843a1ab035", 0),
+        ("23b04ce8c9b278d364a800a8d73aff4d7b3e822d01d36b0057524c772dc595e2",
+         "60deef56c73e4820f97071b2b89c53cf49822c4e0740cfa794c56e331ba3bbbf"
+         "cc1c1f1dabe4cdb4096b143cacff6f3ec2722529034151b7d5e3c5dfc0dd06a5", 1),
+    ]
+    return [(bytes.fromhex(msg), bytes.fromhex(sig), recid) for msg, sig, recid in vectors]
+
+
 # ---- Driver --------------------------------------------------------------
 
 
@@ -241,6 +255,7 @@ def run(exe, commands):
 def all_vectors(rng, count):
     cases = [(v, None) for v in malformed(rng)]
     cases += [(v, None) for v in adversarial(rng) if v is not None]
+    cases += [(v, None) for v in replay_regressions()]
     first_random = len(cases)
     cases += [(v, None) for v in random_valid(rng, count)]
     random_range = range(first_random, len(cases))
@@ -263,6 +278,7 @@ def main():
 
     cases, random_range = all_vectors(rng, args.random)
     known_inputs = {v for v, a in cases if a is not None}
+    replay_inputs = set(replay_regressions())
 
     failures = 0
     stats = []
@@ -278,6 +294,11 @@ def main():
         if got != want:
             failures += 1
             print(f"MISMATCH msg={msg.hex()} sig={sig.hex()} recid={recid}\n  got  {got}\n  want {want}")
+        if (msg, sig, recid) in replay_inputs:
+            doubles, adds = map(int, fields[-3:-1])
+            if doubles > 140 or adds > 100:
+                failures += 1
+                print(f"REPLAY REGRESSION msg={msg.hex()}: {doubles} doubles, {adds} adds")
         if (msg, sig, recid) in known_inputs:
             from_got = None if got is None else address_of(got)
             if from_got != address:

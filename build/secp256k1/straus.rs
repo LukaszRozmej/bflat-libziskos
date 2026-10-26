@@ -1,14 +1,12 @@
 //! Windowed Straus-Shamir double-scalar multiplication `k1·G + k2·P` on secp256k1.
 //!
-//! - `k1` splits as `c0 + c1·2^128`, read in unsigned radix 2^12 digits against constant tables of
-//!   `[d]G` and `[d](2^128·G)`.
+//! - `k1` splits as `c0 + c1·2^128`, read in signed (Booth) radix 2^12 digits against constant tables of
+//!   `[d]G` and `[d](2^128·G)`, negating y for negative digits.
 //! - `k2` splits by GLV as `±b1 ± b2·λ`, read in signed (Booth) radix 2^4 digits against per-call
 //!   tables of `[d]P` and `[d]φ(P)`, whose entries cost precompile calls to build.
 //!
-//! All four halves are below 2^128 and share one chain of 128 doublings. The accumulator starts at
-//! `OFFSET`, a point nobody knows a logarithm of, so it never reaches infinity and the walk needs no
-//! checks for it; `[2^128]OFFSET` is subtracted at the end. Should an addition still meet equal
-//! x-coordinates, the walk runs again on an accumulator that handles infinity and doubling exactly.
+//! All four halves are below 2^128 and share one chain of at most 128 doublings. The accumulator
+//! handles infinity and equal-coordinate additions in place, including on adversarial inputs.
 
 #[cfg(feature = "hints")]
 extern crate alloc;
@@ -22,7 +20,7 @@ use crate::syscalls::{
 
 use super::{
     constants::{BETA, P},
-    g_tables::{G_SHIFTED_TABLE, G_TABLE, G_WINDOW, OFFSET, OFFSET_SHIFTED_NEG},
+    g_tables::{G_SHIFTED_TABLE, G_TABLE, G_WINDOW},
     scalar::glv_decompose_fn_secp256k1,
 };
 
@@ -30,7 +28,7 @@ const P_TABLE_MID: usize = 8;
 const POINT_BYTES: usize = core::mem::size_of::<SyscallPoint256>();
 /// The byte offset of the unused middle entry, which a zero Booth digit maps to.
 const ZERO_DIGIT: usize = P_TABLE_MID * POINT_BYTES;
-const G_MASK: u64 = (1 << G_WINDOW) - 1;
+const G_MASK: u64 = (1 << (G_WINDOW + 1)) - 1;
 const ZERO_POINT: SyscallPoint256 = SyscallPoint256 { x: [0; 4], y: [0; 4] };
 
 /// For each 5-bit Booth window `w` of radix 2^4, the byte offset of entry `P_TABLE_MID + d` of a
@@ -71,6 +69,12 @@ fn entry<'t>(table: &'t [SyscallPoint256; 2 * P_TABLE_MID + 1], offset: usize) -
     unsafe { &*(table.as_ptr() as *const u8).add(offset).cast::<SyscallPoint256>() }
 }
 
+#[inline(always)]
+fn g_digit(word: u64) -> i64 {
+    let window = word & G_MASK;
+    ((window + 1) >> 1) as i64 - ((window >> G_WINDOW) << G_WINDOW) as i64
+}
+
 /// Limb-wise, so that the common mismatch exits on the first limb without a memcmp call.
 #[inline(always)]
 fn same_x(a: &SyscallPoint256, b: &SyscallPoint256) -> bool {
@@ -89,50 +93,13 @@ fn neg_y(y: &[u64; 4]) -> [u64; 4] {
     [l0, l1, l2, l3]
 }
 
-trait Accumulator<'p> {
-    fn double(&mut self, #[cfg(feature = "hints")] hints: &mut Vec<u64>);
-
-    /// Adds the canonical on-curve point `q`; `false` stops the walk.
-    fn add(&mut self, q: &'p SyscallPoint256, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> bool;
-}
-
-/// Starts at `OFFSET` and stops the walk on equal x-coordinates, which the add precompile rejects.
-struct OffsetAccumulator {
-    point: SyscallPoint256,
-}
-
-impl<'p> Accumulator<'p> for OffsetAccumulator {
-    #[inline(always)]
-    fn double(&mut self, #[cfg(feature = "hints")] hints: &mut Vec<u64>) {
-        syscall_secp256k1_dbl(
-            &mut self.point,
-            #[cfg(feature = "hints")]
-            hints,
-        );
-    }
-
-    #[inline(always)]
-    fn add(&mut self, q: &'p SyscallPoint256, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> bool {
-        if same_x(&self.point, q) {
-            return false;
-        }
-        let mut params = SyscallSecp256k1AddParams { p1: &mut self.point, p2: q };
-        syscall_secp256k1_add(
-            &mut params,
-            #[cfg(feature = "hints")]
-            hints,
-        );
-        true
-    }
-}
-
 /// An affine accumulator with an explicit point at infinity, exact on every input.
-struct ExactAccumulator {
+struct Accumulator {
     point: SyscallPoint256,
     infinity: bool,
 }
 
-impl<'p> Accumulator<'p> for ExactAccumulator {
+impl Accumulator {
     #[inline(always)]
     fn double(&mut self, #[cfg(feature = "hints")] hints: &mut Vec<u64>) {
         if !self.infinity {
@@ -146,7 +113,7 @@ impl<'p> Accumulator<'p> for ExactAccumulator {
 
     /// The add precompile requires distinct x-coordinates, so `q = ±acc` is handled here.
     #[inline(always)]
-    fn add(&mut self, q: &'p SyscallPoint256, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> bool {
+    fn add(&mut self, q: &SyscallPoint256, #[cfg(feature = "hints")] hints: &mut Vec<u64>) {
         if self.infinity {
             self.point = *q;
             self.infinity = false;
@@ -168,7 +135,6 @@ impl<'p> Accumulator<'p> for ExactAccumulator {
                 hints,
             );
         }
-        true
     }
 }
 
@@ -187,60 +153,95 @@ struct Walk<'a> {
 impl<'a> Walk<'a> {
     /// Adds the digits at walk position `15·word + k`; those of `k1` sit at every third position.
     #[inline(always)]
-    fn add_digits<'p, A: Accumulator<'p>>(
-        &'p self,
-        acc: &mut A,
+    fn add_digits(
+        &self,
+        acc: &mut Accumulator,
         word: usize,
         k: u32,
         with_g: bool,
         #[cfg(feature = "hints")] hints: &mut Vec<u64>,
-    ) -> bool {
+    ) {
         let shift = 4 * k;
         if with_g {
-            let d = ((self.c0[word] >> shift) & G_MASK) as usize;
-            // SAFETY: d < 2^G_WINDOW, the length of the table.
-            if d != 0
-                && !acc.add(
-                    unsafe { G_TABLE.get_unchecked(d) },
-                    #[cfg(feature = "hints")]
-                    hints,
-                )
-            {
-                return false;
-            }
-            let d = ((self.c1[word] >> shift) & G_MASK) as usize;
-            // SAFETY: d < 2^G_WINDOW, the length of the table.
-            if d != 0
-                && !acc.add(
-                    unsafe { G_SHIFTED_TABLE.get_unchecked(d) },
-                    #[cfg(feature = "hints")]
-                    hints,
-                )
-            {
-                return false;
-            }
-        }
-        let offset = self.b1_offsets[((self.b1[word] >> shift) & 31) as usize];
-        if offset != ZERO_DIGIT
-            && !acc.add(
-                entry(self.p_table, offset),
+            Self::add_g_digit(
+                acc,
+                &G_TABLE,
+                self.c0[word] >> shift,
                 #[cfg(feature = "hints")]
                 hints,
-            )
-        {
-            return false;
-        }
-        let offset = self.b2_offsets[((self.b2[word] >> shift) & 31) as usize];
-        offset == ZERO_DIGIT
-            || acc.add(
-                entry(self.phi_table, offset),
+            );
+            Self::add_g_digit(
+                acc,
+                &G_SHIFTED_TABLE,
+                self.c1[word] >> shift,
                 #[cfg(feature = "hints")]
                 hints,
-            )
+            );
+        }
+        Self::add_p_digit(
+            acc,
+            self.p_table,
+            self.b1_offsets,
+            self.b1[word] >> shift,
+            #[cfg(feature = "hints")]
+            hints,
+        );
+        Self::add_p_digit(
+            acc,
+            self.phi_table,
+            self.b2_offsets,
+            self.b2[word] >> shift,
+            #[cfg(feature = "hints")]
+            hints,
+        );
     }
 
     #[inline(always)]
-    fn double4<'p, A: Accumulator<'p>>(acc: &mut A, #[cfg(feature = "hints")] hints: &mut Vec<u64>) {
+    fn add_g_digit(
+        acc: &mut Accumulator,
+        table: &[SyscallPoint256; (1 << (G_WINDOW - 1)) + 1],
+        word: u64,
+        #[cfg(feature = "hints")] hints: &mut Vec<u64>,
+    ) {
+        let d = g_digit(word);
+        if d != 0 {
+            // SAFETY: a radix-2^G_WINDOW Booth digit has magnitude at most 2^(G_WINDOW-1).
+            let q = unsafe { table.get_unchecked(d.unsigned_abs() as usize) };
+            let negative;
+            let q = if d < 0 {
+                negative = SyscallPoint256 { x: q.x, y: neg_y(&q.y) };
+                &negative
+            } else {
+                q
+            };
+            acc.add(
+                q,
+                #[cfg(feature = "hints")]
+                hints,
+            );
+        }
+    }
+
+    #[inline(always)]
+    fn add_p_digit(
+        acc: &mut Accumulator,
+        table: &[SyscallPoint256; 2 * P_TABLE_MID + 1],
+        offsets: &[usize; 32],
+        word: u64,
+        #[cfg(feature = "hints")] hints: &mut Vec<u64>,
+    ) {
+        let offset = offsets[(word & 31) as usize];
+        if offset != ZERO_DIGIT {
+            acc.add(
+                entry(table, offset),
+                #[cfg(feature = "hints")]
+                hints,
+            );
+        }
+    }
+
+    #[inline(always)]
+    fn double4(acc: &mut Accumulator, #[cfg(feature = "hints")] hints: &mut Vec<u64>) {
         for _ in 0..4 {
             acc.double(
                 #[cfg(feature = "hints")]
@@ -249,21 +250,19 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// Walks positions 32 down to 0 with 128 doublings; `false` if the accumulator stopped it.
+    /// Walks positions 32 down to 0, skipping doublings while the accumulator is infinity.
     #[inline(always)]
-    fn run<'p, A: Accumulator<'p>>(&'p self, acc: &mut A, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> bool {
+    fn run(&self, acc: &mut Accumulator, #[cfg(feature = "hints")] hints: &mut Vec<u64>) {
         macro_rules! digits {
             ($word:expr, $k:expr, $with_g:expr) => {
-                if !self.add_digits(
+                self.add_digits(
                     acc,
                     $word,
                     $k,
                     $with_g,
                     #[cfg(feature = "hints")]
                     hints,
-                ) {
-                    return false;
-                }
+                );
             };
         }
         macro_rules! double4 {
@@ -290,34 +289,10 @@ impl<'a> Walk<'a> {
                 digits!(word, 3 * m, true);
             }
         }
-        true
     }
 
-    /// The walk from `OFFSET`, or `None` if it met equal x-coordinates.
-    #[inline(always)]
-    fn run_offset(&self, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> Option<SyscallPoint256> {
-        let mut acc = OffsetAccumulator { point: OFFSET };
-        let complete = self.run(
-            &mut acc,
-            #[cfg(feature = "hints")]
-            hints,
-        ) && acc.add(
-            &OFFSET_SHIFTED_NEG,
-            #[cfg(feature = "hints")]
-            hints,
-        );
-        if complete {
-            Some(acc.point)
-        } else {
-            None
-        }
-    }
-
-    /// The walk from infinity, or `None` if the result is infinity.
-    #[cold]
-    #[inline(never)]
-    fn run_exact(&self, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> Option<SyscallPoint256> {
-        let mut acc = ExactAccumulator { point: ZERO_POINT, infinity: true };
+    fn multiply(&self, #[cfg(feature = "hints")] hints: &mut Vec<u64>) -> Option<SyscallPoint256> {
+        let mut acc = Accumulator { point: ZERO_POINT, infinity: true };
         self.run(
             &mut acc,
             #[cfg(feature = "hints")]
@@ -355,16 +330,10 @@ pub(crate) fn straus_double_scalar_mul_with_g_secp256k1(
         hints,
     );
     let walk = Walk::new(k1, &b1, &b2, sigma1, sigma2, &tables);
-    let q = match walk.run_offset(
+    let q = walk.multiply(
         #[cfg(feature = "hints")]
         hints,
-    ) {
-        Some(q) => q,
-        None => walk.run_exact(
-            #[cfg(feature = "hints")]
-            hints,
-        )?,
-    };
+    )?;
     Some([q.x[0], q.x[1], q.x[2], q.x[3], q.y[0], q.y[1], q.y[2], q.y[3]])
 }
 
@@ -440,8 +409,8 @@ impl<'a> Walk<'a> {
         tables: &'a PointTables,
     ) -> Self {
         Walk {
-            c0: words(k1[0], k1[1], 0),
-            c1: words(k1[2], k1[3], 0),
+            c0: booth_words(k1[0], k1[1]),
+            c1: booth_words(k1[2], k1[3]),
             b1: booth_words(b1[0], b1[1]),
             b2: booth_words(b2[0], b2[1]),
             b1_offsets: &P_OFFSETS[sigma1 as usize],
@@ -498,7 +467,7 @@ mod tests {
 
     #[test]
     fn digits_recompose() {
-        let halves = [
+        let mut halves = vec![
             [0, 0],
             [1, 0],
             [u64::MAX, 0],
@@ -507,12 +476,17 @@ mod tests {
             [0x8000_0000_0000_0000, 1],
             [0x0123_4567_89AB_CDEF, 0xFEDC_BA98_7654_3210],
         ];
+        for bit in 0..128 {
+            let value = 1u128 << bit;
+            for v in [value - 1, value, value.wrapping_add(1)] {
+                halves.push([v as u64, (v >> 64) as u64]);
+            }
+        }
         let walk = positions();
         assert_eq!(walk.len(), 33);
         for h in halves {
             let value = (h[1] as u128) << 64 | h[0] as u128;
             let booth = booth_words(h[0], h[1]);
-            let unsigned = words(h[0], h[1], 0);
             for sign in 0..2 {
                 let mut acc: i128 = 0;
                 for &(word, k, _) in &walk {
@@ -523,21 +497,21 @@ mod tests {
                 let expected = if sign == 0 { value as i128 } else { (value as i128).wrapping_neg() };
                 assert_eq!(acc, expected, "booth, sign = {sign}, half = {h:x?}");
             }
-            let mut acc: u128 = 0;
+            let mut acc: i128 = 0;
             for &(word, k, with_g) in &walk {
                 acc = acc.wrapping_shl(4);
                 if with_g {
-                    acc = acc.wrapping_add(((unsigned[word] >> (4 * k)) & G_MASK) as u128);
+                    acc = acc.wrapping_add(g_digit(booth[word] >> (4 * k)) as i128);
                 }
             }
-            assert_eq!(acc, value, "unsigned, half = {h:x?}");
+            assert_eq!(acc as u128, value, "generator, half = {h:x?}");
         }
     }
 
     /// Points whose multiples meet the walk's table entries: small multiples of G and of 2^128·G.
     fn bases() -> Vec<[u64; 8]> {
         let mut out = Vec::new();
-        for d in [1usize, 4095] {
+        for d in [1usize, 2048] {
             for t in [&G_TABLE[d], &G_SHIFTED_TABLE[d]] {
                 out.push([t.x[0], t.x[1], t.x[2], t.x[3], t.y[0], t.y[1], t.y[2], t.y[3]]);
                 let y = neg_y(&t.y);
@@ -579,26 +553,30 @@ mod tests {
         out.into_iter().filter(|k| k.iter().rev().cmp(N.iter().rev()).is_lt()).collect()
     }
 
-    /// The offset walk either stops or agrees with the exact one.
     #[test]
-    fn offset_walk_matches_exact_walk() {
-        let mut offset_done = 0;
-        let mut cases = 0;
+    fn walk_matches_scalar_multiplication() {
+        use super::super::{constants::G, glv::glv_scalar_mul_secp256k1};
+
+        let scalars = scalars();
+        let generator: Vec<_> = scalars.iter().map(|k| glv_scalar_mul_secp256k1(k, &G)).collect();
         for p in bases() {
-            for k1 in scalars() {
-                for k2 in scalars() {
-                    let (b1, b2, sigma1, sigma2) = glv_decompose_fn_secp256k1(&k2);
-                    let tables = PointTables::new(&p);
-                    let walk = Walk::new(&k1, &b1, &b2, sigma1, sigma2, &tables);
-                    let exact = walk.run_exact().map(|q| (q.x, q.y));
-                    if let Some(q) = walk.run_offset() {
-                        assert_eq!(Some((q.x, q.y)), exact, "k1 = {k1:x?}, k2 = {k2:x?}, p = {p:x?}");
-                        offset_done += 1;
+            let tables = PointTables::new(&p);
+            let points: Vec<_> = scalars.iter().map(|k| glv_scalar_mul_secp256k1(k, &p)).collect();
+            for (k1, g) in scalars.iter().zip(&generator) {
+                for (k2, q) in scalars.iter().zip(&points) {
+                    let (b1, b2, sigma1, sigma2) = glv_decompose_fn_secp256k1(k2);
+                    let walk = Walk::new(k1, &b1, &b2, sigma1, sigma2, &tables);
+                    let mut expected = Accumulator { point: ZERO_POINT, infinity: true };
+                    for value in [g, q].into_iter().flatten() {
+                        expected.add(&SyscallPoint256 {
+                            x: [value[0], value[1], value[2], value[3]],
+                            y: [value[4], value[5], value[6], value[7]],
+                        });
                     }
-                    cases += 1;
+                    let expected = if expected.infinity { None } else { Some((expected.point.x, expected.point.y)) };
+                    assert_eq!(walk.multiply().map(|q| (q.x, q.y)), expected, "k1 = {k1:x?}, k2 = {k2:x?}, p = {p:x?}");
                 }
             }
         }
-        assert!(offset_done > cases / 2, "{offset_done} of {cases}");
     }
 }
