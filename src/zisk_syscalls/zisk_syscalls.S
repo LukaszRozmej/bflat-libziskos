@@ -131,3 +131,17 @@ ZKVM_LIBCALL      zisklib_keccak256,          0x850
 /* secp256k1 public-key recovery (hash a0, r || s a1, recovery id a2, 64-byte key a3),
  * ZisK's own routine; returns 0 on success. */
 ZKVM_LIBCALL      zisklib_secp256k1_ecrecover, 0x854
+
+/* BN254, KZG and BLS12-381 with ZisK's own routines (ziskasm/zisklib/zkvm/{bn254,bls12_381}.zisk), in the EF
+ * zkVM accelerator C ABI of the Rust crate's zkvm_* exports of the same names; return 0 on success. */
+ZKVM_LIBCALL      zisklib_bn254_g1_add,       0x857
+ZKVM_LIBCALL      zisklib_bn254_g1_mul,       0x858
+ZKVM_LIBCALL      zisklib_bn254_pairing,      0x859
+ZKVM_LIBCALL      zisklib_kzg_point_eval,     0x85B
+ZKVM_LIBCALL      zisklib_bls12_g1_add,       0x85C
+ZKVM_LIBCALL      zisklib_bls12_g1_msm,       0x85D
+ZKVM_LIBCALL      zisklib_bls12_g2_add,       0x85E
+ZKVM_LIBCALL      zisklib_bls12_g2_msm,       0x85F
+ZKVM_LIBCALL      zisklib_bls12_pairing,      0x860
+ZKVM_LIBCALL      zisklib_bls12_map_fp_to_g1, 0x861
+ZKVM_LIBCALL      zisklib_bls12_map_fp2_to_g2, 0x862
